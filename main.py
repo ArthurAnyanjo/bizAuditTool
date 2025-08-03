@@ -576,6 +576,54 @@ class WebsiteAuditApp:
         with tab3:
             if st.button("View Technical SEO", use_container_width=True):
                 self.display_technical_seo(analysis.get('basic_analysis', {}).get('technical_seo', {}))
+        
+        # Download PDF Report Section
+        st.subheader("📄 Download Report")
+        st.write("Generate a comprehensive PDF report of your performance audit and content analysis results.")
+        
+        # Check if both audit and content results are available
+        if st.session_state.audit_results and st.session_state.content_results:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("Generate PDF Report", type="primary", use_container_width=True):
+                    with st.spinner("Generating PDF report..."):
+                        # Get the URL from the content results or use a placeholder
+                        url = st.session_state.content_results.get('scraped_data', {}).get('base_url', 'Unknown URL')
+                        pdf_bytes = self.generate_pdf_report(url)
+                        
+                        if pdf_bytes:
+                            # Create download button
+                            st.download_button(
+                                label="Download PDF Report",
+                                data=pdf_bytes,
+                                file_name=f"website_audit_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                            st.success("PDF report generated successfully!")
+                        else:
+                            st.error("Failed to generate PDF report. Please try again.")
+            
+            with col2:
+                st.info("""
+                **Report includes:**
+                • Executive Summary
+                • Performance Analysis
+                • SEO Analysis  
+                • Content Analysis
+                • Technical Analysis
+                • Recommendations
+                """)
+        else:
+            st.warning("""
+            **Both performance audit and content analysis results are required to generate the PDF report.**
+            
+            Please run both analyses first:
+            1. Go to "Performance Audit" and run the audit
+            2. Return to "Content Analysis" and run the analysis
+            3. Then you can generate the PDF report
+            """)
     
     def display_seo_analysis(self, seo_data):
         """Display SEO analysis results"""
@@ -663,6 +711,31 @@ class WebsiteAuditApp:
                     st.write(f"• {issue}")
             else:
                 st.write("No URL issues found")
+    
+    def generate_pdf_report(self, url: str) -> bytes:
+        """Generate PDF report using the report generator"""
+        try:
+            # Get the audit and content results from session state
+            audit_results = st.session_state.audit_results
+            content_results = st.session_state.content_results
+            
+            if not audit_results or not content_results:
+                st.error("Both performance audit and content analysis results are required to generate the report.")
+                return None
+            
+            # Generate the PDF report
+            pdf_bytes = self.report_generator.generate_report(
+                url=url,
+                audit_data=audit_results,
+                content_data=content_results,
+                format_type='pdf'
+            )
+            
+            return pdf_bytes
+            
+        except Exception as e:
+            st.error(f"Error generating PDF report: {str(e)}")
+            return None
     
     def render_prompt_page(self):
         """Render the AI prompt generator page"""

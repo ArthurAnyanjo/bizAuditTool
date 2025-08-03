@@ -1,10 +1,10 @@
-import requests
-import json
+import requests 
 import time
 from typing import Dict, Any, Optional
 import logging
-from urllib.parse import quote
 import streamlit as st
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +24,18 @@ class PageSpeedAnalyzer:
         """
         self.api_key = api_key or st.secrets.get("PAGESPEED_API_KEY", "")
         self.base_url = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+        
+        # Configure retry strategy
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         
         # Categories to analyze
         self.categories = [
@@ -98,11 +110,17 @@ class PageSpeedAnalyzer:
             if not self._validate_url(url):
                 raise ValueError("Invalid URL format")
             
+            # Check API key status
+            has_api_key = self._check_api_key()
+            
             # Make API request
             api_response = self._make_api_request(url, strategy)
             
             # Process and structure the response
             processed_results = self._process_api_response(api_response, url, strategy)
+            
+            # Add API key status to results
+            processed_results['api_key_used'] = has_api_key
             
             logger.info(f"PageSpeed analysis completed for {url}")
             return processed_results
@@ -119,6 +137,13 @@ class PageSpeedAnalyzer:
         if not url.startswith(('http://', 'https://')):
             return False
         
+        return True
+    
+    def _check_api_key(self) -> bool:
+        """Check if API key is available and valid"""
+        if not self.api_key:
+            logger.warning("No API key provided. Using public API with limited rate limits.")
+            return False
         return True
     
     def _make_api_request(self, url: str, strategy: str) -> Dict[str, Any]:
@@ -143,26 +168,67 @@ class PageSpeedAnalyzer:
         if self.api_key:
             params['key'] = self.api_key
         
-        try:
-            # Make request with timeout
-            response = requests.get(
-                self.base_url,
-                params=params,
-                timeout=30
-            )
-            
-            # Check for API errors
-            if response.status_code == 429:
-                raise Exception("API rate limit exceeded. Please try again later.")
-            elif response.status_code == 400:
-                raise Exception("Invalid request. Please check the URL format.")
-            elif response.status_code != 200:
-                raise Exception(f"API request failed with status {response.status_code}")
-            
-            return response.json()
-            
-        except requests.RequestException as e:
-            raise Exception(f"Network error during API request: {str(e)}")
+        max_retries = 3
+        base_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Making API request to PageSpeed Insights (attempt {attempt + 1}/{max_retries})")
+                
+                # Make request with timeout - increased timeout for slow sites
+                response = self.session.get(
+                    self.base_url,
+                    params=params,
+                    timeout=(10, 60)  # (connect timeout, read timeout)
+                )
+                
+                # Check for API errors
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"Rate limited, waiting {delay} seconds before retry...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        raise Exception("API rate limit exceeded. Please try again later.")
+                elif response.status_code == 400:
+                    raise Exception("Invalid request. Please check the URL format.")
+                elif response.status_code == 403:
+                    raise Exception("API key is invalid or quota exceeded. Please check your API key.")
+                elif response.status_code != 200:
+                    raise Exception(f"API request failed with status {response.status_code}: {response.text}")
+                
+                return response.json()
+                
+            except requests.Timeout as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Request timed out, retrying in {delay} seconds... (attempt {attempt + 1})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    raise Exception(f"Request timed out after {max_retries} attempts. The website may be too slow to analyze.")
+                    
+            except requests.ConnectionError as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Connection error, retrying in {delay} seconds... (attempt {attempt + 1})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    raise Exception(f"Connection error after {max_retries} attempts. Please check your internet connection.")
+                    
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"Network error: {str(e)}, retrying in {delay} seconds... (attempt {attempt + 1})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    raise Exception(f"Network error during API request after {max_retries} attempts: {str(e)}")
+        
+        # This should never be reached, but just in case
+        raise Exception("Failed to make API request after all retry attempts")
     
     def _process_api_response(self, response: Dict[str, Any], url: str, strategy: str) -> Dict[str, Any]:
         """
@@ -462,6 +528,55 @@ class PageSpeedAnalyzer:
             return 'LOW'
         else:
             return 'MINIMAL'
+    
+    def analyze_with_fallback(self, url: str, strategy: str = 'mobile') -> Dict[str, Any]:
+        """
+        Analyze URL with fallback for slow websites
+        
+        Args:
+            url: Website URL to analyze
+            strategy: Analysis strategy
+            
+        Returns:
+            Analysis results or fallback data
+        """
+        try:
+            return self.analyze(url, strategy)
+        except Exception as e:
+            error_msg = str(e)
+            
+            # If it's a timeout, provide helpful fallback
+            if "timed out" in error_msg.lower():
+                logger.warning(f"Analysis timed out for {url}, providing fallback data")
+                return {
+                    'url': url,
+                    'strategy': strategy,
+                    'error': 'timeout',
+                    'message': 'Website analysis timed out. This may indicate the site is very slow or unresponsive.',
+                    'recommendations': [
+                        'Check if the website is accessible in a browser',
+                        'The site may be experiencing high load or technical issues',
+                        'Try analyzing during off-peak hours',
+                        'Consider using a different URL or subdomain'
+                    ],
+                    'fallback_data': {
+                        'performance_score': 0,
+                        'accessibility_score': 0,
+                        'best_practices_score': 0,
+                        'seo_score': 0,
+                        'core_web_vitals': {},
+                        'performance_metrics': {},
+                        'opportunities': [],
+                        'diagnostics': [],
+                        'seo_audits': [],
+                        'accessibility_audits': [],
+                        'loading_experience': {},
+                        'resource_summary': {}
+                    }
+                }
+            else:
+                # Re-raise other errors
+                raise e
     
     def batch_analyze(self, urls: list, strategy: str = 'mobile') -> Dict[str, Any]:
         """

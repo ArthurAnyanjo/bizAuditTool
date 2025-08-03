@@ -163,19 +163,27 @@ class ReportGenerator:
         story.append(PageBreak())
         
         # SEO analysis
-        story.extend(self._build_seo_section(audit_data, content_data))
-        story.append(PageBreak())
+        seo_section = self._build_seo_section(audit_data, content_data)
+        if seo_section is not None:
+            story.extend(seo_section)
+            story.append(PageBreak())
         
         # Content analysis
-        story.extend(self._build_content_section(content_data))
-        story.append(PageBreak())
+        content_section = self._build_content_section(content_data)
+        if content_section is not None:
+            story.extend(content_section)
+            story.append(PageBreak())
         
         # Recommendations
-        story.extend(self._build_recommendations_section(audit_data, content_data))
-        story.append(PageBreak())
+        recommendations_section = self._build_recommendations_section(audit_data, content_data)
+        if recommendations_section is not None:
+            story.extend(recommendations_section)
+            story.append(PageBreak())
         
         # Technical details
-        story.extend(self._build_technical_section(audit_data, content_data))
+        technical_section = self._build_technical_section(audit_data, content_data)
+        if technical_section is not None:
+            story.extend(technical_section)
         
         # Build PDF
         doc.build(story)
@@ -240,16 +248,26 @@ class ReportGenerator:
                 status
             ])
         
-        scores_table = Table(table_data, colWidths=[2*inch, 1*inch, 1*inch, 1*inch])
+        # Adjust column widths to prevent text truncation
+        scores_table = Table(table_data, colWidths=[2.5*inch, 1.2*inch, 1.2*inch, 1.5*inch])
         scores_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5E81AC')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('WORDWRAP', (0, 0), (-1, -1), True)
         ]))
         
         elements.append(scores_table)
@@ -364,11 +382,17 @@ class ReportGenerator:
         elements.append(Paragraph("SEO Analysis", self.section_style))
         elements.append(Spacer(1, 20))
         
+        # Check if we have any SEO data to display
+        has_seo_data = False
+        
         # Get SEO scores from audit data
         seo_scores = {}
         for device, data in audit_data.items():
             if device in ['mobile', 'desktop']:
-                seo_scores[device] = int(data.get('seo_score', 0) * 100)
+                seo_score = int(data.get('seo_score', 0) * 100)
+                if seo_score > 0:
+                    seo_scores[device] = seo_score
+                    has_seo_data = True
         
         # SEO Score summary
         if seo_scores:
@@ -385,10 +409,12 @@ class ReportGenerator:
         
         # Content analysis SEO elements
         seo_analysis = content_data.get('analysis', {}).get('seo_elements', {})
-        if seo_analysis:
+        if seo_analysis and any(seo_analysis.values()):
+            has_seo_data = True
+            
             # Title analysis
             title_analysis = seo_analysis.get('title_analysis', {})
-            if title_analysis:
+            if title_analysis and any(title_analysis.values()):
                 elements.append(Paragraph("Title Tag Analysis", self.subtitle_style))
                 
                 if title_analysis.get('missing_titles', 0) > 0:
@@ -410,16 +436,17 @@ class ReportGenerator:
                     ))
                 
                 avg_length = title_analysis.get('avg_title_length', 0)
-                elements.append(Paragraph(
-                    f"• Average title length: {avg_length:.0f} characters",
-                    self.styles['Normal']
-                ))
+                if avg_length > 0:
+                    elements.append(Paragraph(
+                        f"• Average title length: {avg_length:.0f} characters",
+                        self.styles['Normal']
+                    ))
                 
                 elements.append(Spacer(1, 15))
             
             # Meta description analysis
             meta_analysis = seo_analysis.get('meta_description_analysis', {})
-            if meta_analysis:
+            if meta_analysis and any(meta_analysis.values()):
                 elements.append(Paragraph("Meta Description Analysis", self.subtitle_style))
                 
                 if meta_analysis.get('missing_descriptions', 0) > 0:
@@ -435,16 +462,17 @@ class ReportGenerator:
                     ))
                 
                 avg_desc_length = meta_analysis.get('avg_description_length', 0)
-                elements.append(Paragraph(
-                    f"• Average description length: {avg_desc_length:.0f} characters",
-                    self.styles['Normal']
-                ))
+                if avg_desc_length > 0:
+                    elements.append(Paragraph(
+                        f"• Average description length: {avg_desc_length:.0f} characters",
+                        self.styles['Normal']
+                    ))
                 
                 elements.append(Spacer(1, 15))
             
             # Heading analysis
             heading_analysis = seo_analysis.get('heading_analysis', {})
-            if heading_analysis:
+            if heading_analysis and any(heading_analysis.values()):
                 elements.append(Paragraph("Heading Structure Analysis", self.subtitle_style))
                 
                 h1_issues = heading_analysis.get('h1_issues', [])
@@ -458,32 +486,38 @@ class ReportGenerator:
                 if heading_dist:
                     elements.append(Paragraph("• Header distribution:", self.styles['Normal']))
                     for level, count in heading_dist.items():
-                        elements.append(Paragraph(
-                            f"  {level.upper()}: {count} tags",
-                            self.styles['Normal']
-                        ))
+                        if count > 0:
+                            elements.append(Paragraph(
+                                f"  {level.upper()}: {count} tags",
+                                self.styles['Normal']
+                            ))
                 
                 elements.append(Spacer(1, 15))
             
             # Image SEO analysis
             image_analysis = seo_analysis.get('image_analysis', {})
-            if image_analysis:
+            if image_analysis and any(image_analysis.values()):
                 elements.append(Paragraph("Image SEO Analysis", self.subtitle_style))
                 
                 total_images = image_analysis.get('total_images', 0)
                 missing_alt = image_analysis.get('images_without_alt', 0)
                 
-                elements.append(Paragraph(f"• Total images: {total_images}", self.styles['Normal']))
-                
-                if missing_alt > 0:
-                    elements.append(Paragraph(
-                        f"• {missing_alt} images missing alt text ({(missing_alt/total_images)*100:.1f}%)",
-                        self.issue_style
-                    ))
-                else:
-                    elements.append(Paragraph("• All images have alt text", self.success_style))
+                if total_images > 0:
+                    elements.append(Paragraph(f"• Total images: {total_images}", self.styles['Normal']))
+                    
+                    if missing_alt > 0:
+                        elements.append(Paragraph(
+                            f"• {missing_alt} images missing alt text ({(missing_alt/total_images)*100:.1f}%)",
+                            self.issue_style
+                        ))
+                    else:
+                        elements.append(Paragraph("• All images have alt text", self.success_style))
                 
                 elements.append(Spacer(1, 15))
+        
+        # If no SEO data available, return None instead of empty section
+        if not has_seo_data:
+            return None
         
         return elements
     
@@ -496,50 +530,64 @@ class ReportGenerator:
         
         analysis = content_data.get('analysis', {})
         
+        # Check if we have any content data to display
+        has_content_data = False
+        
         # Content overview
         content_structure = analysis.get('content_structure', {})
-        if content_structure:
+        if content_structure and any(content_structure.values()):
+            has_content_data = True
             elements.append(Paragraph("Content Overview", self.subtitle_style))
             
             total_pages = content_structure.get('total_pages', 0)
-            elements.append(Paragraph(f"• Total pages analyzed: {total_pages}", self.styles['Normal']))
+            if total_pages > 0:
+                elements.append(Paragraph(f"• Total pages analyzed: {total_pages}", self.styles['Normal']))
             
             page_types = content_structure.get('page_types', {})
             if page_types:
                 elements.append(Paragraph("• Page types found:", self.styles['Normal']))
                 for page_type, count in page_types.items():
-                    elements.append(Paragraph(f"  - {page_type.title()}: {count} pages", self.styles['Normal']))
+                    if count > 0:
+                        elements.append(Paragraph(f"  - {page_type.title()}: {count} pages", self.styles['Normal']))
             
             avg_sections = content_structure.get('avg_sections_per_page', 0)
-            elements.append(Paragraph(f"• Average sections per page: {avg_sections:.1f}", self.styles['Normal']))
+            if avg_sections > 0:
+                elements.append(Paragraph(f"• Average sections per page: {avg_sections:.1f}", self.styles['Normal']))
             
             elements.append(Spacer(1, 15))
         
         # Content quality
         content_quality = analysis.get('content_quality', {})
-        if content_quality:
+        if content_quality and any(content_quality.values()):
+            has_content_data = True
             elements.append(Paragraph("Content Quality Metrics", self.subtitle_style))
             
             total_words = content_quality.get('total_word_count', 0)
+            if total_words > 0:
+                elements.append(Paragraph(f"• Total word count: {total_words:,}", self.styles['Normal']))
+            
             avg_words = content_quality.get('avg_word_count_per_page', 0)
+            if avg_words > 0:
+                elements.append(Paragraph(f"• Average words per page: {avg_words:.0f}", self.styles['Normal']))
+            
             avg_readability = content_quality.get('avg_readability_score', 0)
+            if avg_readability > 0:
+                elements.append(Paragraph(f"• Average readability score: {avg_readability:.1f}/100", self.styles['Normal']))
+            
             quality_score = content_quality.get('overall_quality_score', 0)
-            
-            elements.append(Paragraph(f"• Total word count: {total_words:,}", self.styles['Normal']))
-            elements.append(Paragraph(f"• Average words per page: {avg_words:.0f}", self.styles['Normal']))
-            elements.append(Paragraph(f"• Average readability score: {avg_readability:.1f}/100", self.styles['Normal']))
-            
-            quality_color = self._get_score_color(quality_score)
-            elements.append(Paragraph(
-                f"• <font color='{quality_color}'>Overall content quality: {quality_score:.1f}/100</font>",
-                self.styles['Normal']
-            ))
+            if quality_score > 0:
+                quality_color = self._get_score_color(quality_score)
+                elements.append(Paragraph(
+                    f"• <font color='{quality_color}'>Overall content quality: {quality_score:.1f}/100</font>",
+                    self.styles['Normal']
+                ))
             
             elements.append(Spacer(1, 15))
         
         # Keyword analysis
         keyword_analysis = analysis.get('keyword_analysis', {})
-        if keyword_analysis:
+        if keyword_analysis and any(keyword_analysis.values()):
+            has_content_data = True
             elements.append(Paragraph("Keyword Analysis", self.subtitle_style))
             
             primary_keywords = keyword_analysis.get('primary_keywords', [])[:10]
@@ -549,13 +597,15 @@ class ReportGenerator:
                 elements.append(Paragraph(f"  {keyword_text}", self.styles['Normal']))
             
             total_keywords = keyword_analysis.get('total_unique_keywords', 0)
-            elements.append(Paragraph(f"• Total unique keywords: {total_keywords}", self.styles['Normal']))
+            if total_keywords > 0:
+                elements.append(Paragraph(f"• Total unique keywords: {total_keywords}", self.styles['Normal']))
             
             elements.append(Spacer(1, 15))
         
         # Content gaps
         content_gaps = analysis.get('content_gaps', {})
-        if content_gaps:
+        if content_gaps and any(content_gaps.values()):
+            has_content_data = True
             elements.append(Paragraph("Content Gap Analysis", self.subtitle_style))
             
             missing_pages = content_gaps.get('missing_pages', [])
@@ -573,6 +623,10 @@ class ReportGenerator:
             
             elements.append(Spacer(1, 15))
         
+        # If no content data available, return None instead of empty section
+        if not has_content_data:
+            return None
+        
         return elements
     
     def _build_recommendations_section(self, audit_data: Dict[str, Any], 
@@ -583,33 +637,45 @@ class ReportGenerator:
         elements.append(Paragraph("Recommendations", self.section_style))
         elements.append(Spacer(1, 20))
         
+        # Check if we have any recommendations to display
+        has_recommendations = False
+        
         # Get recommendations from content analysis
         recommendations = content_data.get('analysis', {}).get('recommendations', [])
         
         # Priority recommendations
-        elements.append(Paragraph("High Priority Recommendations", self.subtitle_style))
-        
         high_priority = self._categorize_recommendations(recommendations, 'high')
-        for i, rec in enumerate(high_priority[:5], 1):
-            elements.append(Paragraph(f"{i}. {rec}", self.rec_style))
-        
-        elements.append(Spacer(1, 20))
+        if high_priority:
+            has_recommendations = True
+            elements.append(Paragraph("High Priority Recommendations", self.subtitle_style))
+            
+            for i, rec in enumerate(high_priority[:5], 1):
+                elements.append(Paragraph(f"{i}. {rec}", self.rec_style))
+            
+            elements.append(Spacer(1, 20))
         
         # Medium priority recommendations
-        elements.append(Paragraph("Medium Priority Recommendations", self.subtitle_style))
-        
         medium_priority = self._categorize_recommendations(recommendations, 'medium')
-        for i, rec in enumerate(medium_priority[:5], 1):
-            elements.append(Paragraph(f"{i}. {rec}", self.rec_style))
-        
-        elements.append(Spacer(1, 20))
+        if medium_priority:
+            has_recommendations = True
+            elements.append(Paragraph("Medium Priority Recommendations", self.subtitle_style))
+            
+            for i, rec in enumerate(medium_priority[:5], 1):
+                elements.append(Paragraph(f"{i}. {rec}", self.rec_style))
+            
+            elements.append(Spacer(1, 20))
         
         # Performance-specific recommendations
         perf_recommendations = self._extract_performance_recommendations(audit_data)
         if perf_recommendations:
+            has_recommendations = True
             elements.append(Paragraph("Performance Optimization", self.subtitle_style))
             for i, rec in enumerate(perf_recommendations[:5], 1):
                 elements.append(Paragraph(f"{i}. {rec}", self.rec_style))
+        
+        # If no recommendations available, return None instead of empty section
+        if not has_recommendations:
+            return None
         
         return elements
     
@@ -621,18 +687,23 @@ class ReportGenerator:
         elements.append(Paragraph("Technical Analysis", self.section_style))
         elements.append(Spacer(1, 20))
         
+        # Check if we have any technical data to display
+        has_technical_data = False
+        
         # Technical SEO from content analysis
         technical_seo = content_data.get('analysis', {}).get('technical_seo', {})
-        if technical_seo:
+        if technical_seo and any(technical_seo.values()):
+            has_technical_data = True
             elements.append(Paragraph("Technical SEO", self.subtitle_style))
             
             # URL analysis
             url_analysis = technical_seo.get('url_analysis', {})
-            if url_analysis:
+            if url_analysis and any(url_analysis.values()):
                 url_issues = url_analysis.get('issues', [])
                 avg_length = url_analysis.get('avg_url_length', 0)
                 
-                elements.append(Paragraph(f"• Average URL length: {avg_length:.0f} characters", self.styles['Normal']))
+                if avg_length > 0:
+                    elements.append(Paragraph(f"• Average URL length: {avg_length:.0f} characters", self.styles['Normal']))
                 
                 if url_issues:
                     elements.append(Paragraph("• URL issues found:", self.issue_style))
@@ -643,7 +714,7 @@ class ReportGenerator:
             
             # HTTPS analysis
             https_analysis = technical_seo.get('https_analysis', {})
-            if https_analysis:
+            if https_analysis and any(https_analysis.values()):
                 uses_https = https_analysis.get('uses_https', False)
                 if uses_https:
                     elements.append(Paragraph("• Site uses HTTPS", self.success_style))
@@ -652,36 +723,64 @@ class ReportGenerator:
             
             # Structured data
             structured_data = technical_seo.get('structured_data_analysis', {})
-            if structured_data:
+            if structured_data and any(structured_data.values()):
                 has_schema = structured_data.get('has_structured_data', False)
                 if has_schema:
                     schema_count = structured_data.get('count', 0)
-                    elements.append(Paragraph(f"• {schema_count} structured data items found", self.success_style))
+                    if schema_count > 0:
+                        elements.append(Paragraph(f"• {schema_count} structured data items found", self.success_style))
+                    else:
+                        elements.append(Paragraph("• Structured data found but count is 0", self.success_style))
                 else:
                     elements.append(Paragraph("• No structured data found", self.issue_style))
             
             elements.append(Spacer(1, 15))
         
         # Performance metrics details
-        elements.append(Paragraph("Performance Metrics Details", self.subtitle_style))
-        
+        has_performance_data = False
         for device, data in audit_data.items():
             if device in ['mobile', 'desktop']:
-                elements.append(Paragraph(f"{device.title()} Metrics:", self.styles['Normal']))
-                
-                # Resource summary
                 resource_summary = data.get('resource_summary', {})
-                if resource_summary:
-                    total_size = resource_summary.get('total_byte_weight', 0) / 1024  # Convert to KB
-                    total_requests = resource_summary.get('total_requests', 0)
+                if resource_summary and any(resource_summary.values()):
+                    has_performance_data = True
+                    break
+        
+        if has_performance_data:
+            has_technical_data = True
+            elements.append(Paragraph("Performance Metrics Details", self.subtitle_style))
+            
+            for device, data in audit_data.items():
+                if device in ['mobile', 'desktop']:
+                    elements.append(Paragraph(f"{device.title()} Metrics:", self.styles['Normal']))
                     
-                    elements.append(Paragraph(f"  - Total page size: {total_size:.0f} KB", self.styles['Normal']))
-                    elements.append(Paragraph(f"  - Total requests: {total_requests}", self.styles['Normal']))
-                    elements.append(Paragraph(f"  - Images: {resource_summary.get('image_count', 0)}", self.styles['Normal']))
-                    elements.append(Paragraph(f"  - Scripts: {resource_summary.get('script_count', 0)}", self.styles['Normal']))
-                    elements.append(Paragraph(f"  - Stylesheets: {resource_summary.get('stylesheet_count', 0)}", self.styles['Normal']))
-                
-                elements.append(Spacer(1, 10))
+                    # Resource summary
+                    resource_summary = data.get('resource_summary', {})
+                    if resource_summary and any(resource_summary.values()):
+                        total_size = resource_summary.get('total_byte_weight', 0) / 1024  # Convert to KB
+                        total_requests = resource_summary.get('total_requests', 0)
+                        
+                        if total_size > 0:
+                            elements.append(Paragraph(f"  - Total page size: {total_size:.0f} KB", self.styles['Normal']))
+                        if total_requests > 0:
+                            elements.append(Paragraph(f"  - Total requests: {total_requests}", self.styles['Normal']))
+                        
+                        image_count = resource_summary.get('image_count', 0)
+                        if image_count > 0:
+                            elements.append(Paragraph(f"  - Images: {image_count}", self.styles['Normal']))
+                        
+                        script_count = resource_summary.get('script_count', 0)
+                        if script_count > 0:
+                            elements.append(Paragraph(f"  - Scripts: {script_count}", self.styles['Normal']))
+                        
+                        stylesheet_count = resource_summary.get('stylesheet_count', 0)
+                        if stylesheet_count > 0:
+                            elements.append(Paragraph(f"  - Stylesheets: {stylesheet_count}", self.styles['Normal']))
+                    
+                    elements.append(Spacer(1, 10))
+        
+        # If no technical data available, return None instead of empty section
+        if not has_technical_data:
+            return None
         
         return elements
     
